@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Commute — carpool</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root{
+    --ink:#14213D;
+    --asphalt:#2B2D42;
+    --amber:#F2A93B;
+    --cream:#F6F4EE;
+    --panel:#FFFFFF;
+    --line:#DEDACD;
+    --text:#1B1B1F;
+    --muted:#6B6E76;
+    --pilot:#2E7D5B;
+    --pilot-soft:#E4F1EA;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --cream:#0F1220; --panel:#181C2C; --line:#2A2F45; --text:#EDEDF2; --muted:#9295A6; --pilot-soft:#173327;
+    }
+  }
+  :root[data-theme="dark"]{
+    --cream:#0F1220; --panel:#181C2C; --line:#2A2F45; --text:#EDEDF2; --muted:#9295A6; --pilot-soft:#173327;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--cream);}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--text);
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  .app{max-width:480px;margin:0 auto;padding:18px 18px 40px;}
+  header{display:flex;align-items:center;justify-content:space-between;padding:6px 2px 18px;}
+  .brand{font-size:22px;font-weight:700;letter-spacing:-0.01em;}
+  .brand span{color:var(--amber);}
+  .mode-toggle{display:flex;align-items:center;gap:10px;}
+  #modeLabel{font-size:13px;font-weight:600;color:var(--muted);min-width:64px;text-align:right;}
+  .switch{
+    width:52px;height:30px;border-radius:16px;border:none;background:var(--asphalt);
+    position:relative;cursor:pointer;padding:0;flex-shrink:0;transition:background .2s ease;
+  }
+  .switch.on{background:var(--pilot);}
+  .switch .knob{
+    position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;
+    background:var(--cream);transition:transform .2s ease;
+  }
+  .switch.on .knob{transform:translateX(22px);}
+
+  .map-panel{
+    background:var(--asphalt);border-radius:18px;padding:10px;margin-bottom:16px;overflow:hidden;
+  }
+  #mapContainer{width:100%;height:260px;border-radius:12px;background:#dfe3e6;}
+  .leaflet-container{font-family:inherit;border-radius:12px;}
+  .status-line{font-size:12px;color:var(--muted);padding:8px 2px 0;min-height:16px;}
+  .rider-marker{
+    background:var(--pilot);color:#fff;border-radius:50%;width:26px;height:26px;
+    display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;
+    border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);
+  }
+  .rider-marker.accepted{background:var(--muted);opacity:.5;}
+
+  .live-card{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:12px 14px;margin-bottom:14px;
+  }
+  .live-card.hidden{display:none;}
+  .live-badge{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--pilot);}
+  .live-dot{width:7px;height:7px;border-radius:50%;background:var(--pilot);animation:pulse 1.6s infinite;}
+  @keyframes pulse{0%{opacity:1;}50%{opacity:.3;}100%{opacity:1;}}
+  .live-eta{font-size:20px;font-weight:700;}
+  .live-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+  .live-synced{font-size:11px;color:var(--muted);text-align:right;}
+
+  section.card{
+    background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:16px;margin-bottom:14px;
+  }
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:600;}
+  .field + .field{margin-top:12px;}
+  input[type=text]{
+    width:100%;padding:11px 12px;border-radius:10px;border:1px solid var(--line);
+    background:var(--cream);color:var(--text);font-size:15px;
+  }
+  input[type=text]:focus{outline:2px solid var(--amber);outline-offset:1px;}
+  button.primary{
+    width:100%;margin-top:16px;padding:13px;border:none;border-radius:10px;
+    background:var(--ink);color:#fff;font-size:15px;font-weight:700;cursor:pointer;
+  }
+  button.primary.pilot{background:var(--pilot);}
+  button.primary:active{opacity:.85;}
+
+  h2{font-size:15px;margin:0 0 10px;}
+  ul{list-style:none;margin:0;padding:0;}
+  li.row{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:10px 0;border-bottom:1px solid var(--line);
+  }
+  li.row:last-child{border-bottom:none;}
+  .who{font-weight:700;font-size:14px;}
+  .meta{font-size:12px;color:var(--muted);margin-top:2px;}
+  .accept-btn{
+    border:none;background:var(--pilot-soft);color:var(--pilot);font-weight:700;
+    padding:8px 12px;border-radius:8px;font-size:13px;cursor:pointer;flex-shrink:0;
+  }
+  .empty{color:var(--muted);font-size:13px;padding:6px 0;}
+  .hidden{display:none;}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">Commute<span>.</span></div>
+    <div class="mode-toggle">
+      <span id="modeLabel">Passenger</span>
+      <button id="pilotToggle" class="switch" role="switch" aria-checked="false" aria-label="Toggle pilot mode">
+        <span class="knob"></span>
+      </button>
+    </div>
+  </header>
+
+  <div class="map-panel">
+    <div id="mapContainer"></div>
+    <div class="status-line" id="statusLine">Enter a start and destination, then tap the button below.</div>
+  </div>
+
+  <div class="live-card hidden" id="liveCard">
+    <div>
+      <div class="live-badge"><span class="live-dot"></span>LIVE</div>
+      <div class="live-eta" id="liveEta">—</div>
+      <div class="live-sub" id="liveSub">—</div>
+    </div>
+    <div class="live-synced" id="liveSynced">—</div>
+  </div>
+
+  <section class="card">
+    <div class="field">
+      <label for="startInput">Start point</label>
+      <input type="text" id="startInput" placeholder="e.g. Indiranagar, Bengaluru">
+    </div>
+    <div class="field">
+      <label for="endInput">Destination</label>
+      <input type="text" id="endInput" placeholder="e.g. Whitefield, Bengaluru">
+    </div>
+    <button class="primary" id="actionBtn">Find a ride</button>
+  </section>
+
+  <section class="card" id="passengerPanel">
+    <h2>Pilots along this route</h2>
+    <ul id="pilotList"></ul>
+  </section>
+
+  <section class="card hidden" id="pilotPanel">
+    <h2>Riders requesting your route</h2>
+    <ul id="requestList"></ul>
+  </section>
+
+  <section class="card hidden" id="acceptedPanel">
+    <h2>Your accepted passengers</h2>
+    <ul id="acceptedList"><li class="empty">None yet — accept a rider above.</li></ul>
+  </section>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function(){
+  // ---------------------------------------------------------------
+  // CONFIG — change this to your real email. Nominatim's usage policy
+  // requires apps to identify themselves. A page opened from a file
+  // can't set a User-Agent or send a Referer, so the `email` query
+  // parameter is the sanctioned way to identify yourself instead.
+  // ---------------------------------------------------------------
+  var CONTACT_EMAIL = 'rayyanismail2412@gmail.com';
+  var ROUTE_CACHE_TTL_MS = 120 * 1000; // re-fetch routes after this long, to stay "live"
+
+  // Free CARTO basemap key — request one at https://carto.com/basemaps/apikey
+  // (emailed back instantly, no account needed). Paste it between the quotes.
+  var CARTO_API_KEY = 'cb1_4aew_1_b73919bec9eaa044aa3f7f56';
+
+  // Bengaluru default center — change if your users are elsewhere
+  var map = L.map('mapContainer').setView([12.9716, 77.5946], 12);
+
+  // Map tiles. tile.openstreetmap.org requires a Referer header, which
+  // browsers don't send for pages opened from disk (file://), so in that
+  // case start with the CARTO tiles. Over http(s), try OSM first and
+  // fall back to CARTO if the OSM server starts rejecting tiles.
+  function cartoLayer(){
+    var keyParam = CARTO_API_KEY ? '?key=' + encodeURIComponent(CARTO_API_KEY) : '';
+    return L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png' + keyParam, {
+      maxZoom: 19,
+      subdomains: 'abcd',
+      attribution: '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+    });
+  }
+
+  if (location.protocol === 'file:') {
+    cartoLayer().addTo(map);
+  } else {
+    var primaryTiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    var usingFallback = false;
+    var tileErrorCount = 0;
+    primaryTiles.on('tileerror', function(){
+      tileErrorCount++;
+      if (!usingFallback && tileErrorCount > 6) {
+        usingFallback = true;
+        map.removeLayer(primaryTiles);
+        cartoLayer().addTo(map);
+        setStatus('Switched to a backup map provider (primary tile server was rate-limiting).');
+      }
+    });
+  }
+
+  var startIcon = L.divIcon({className:'', html:'<div style="background:#F2A93B;width:16px;height:16px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>', iconSize:[16,16]});
+  var endIcon = L.divIcon({className:'', html:'<div style="background:#EF6461;width:16px;height:16px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>', iconSize:[16,16]});
+
+  var startMarker = null, endMarker = null, routeLine = null, riderMarkers = [];
+  var statusLine = document.getElementById('statusLine');
+
+  function setStatus(msg){ statusLine.textContent = msg; }
+
+  // ---------------------------------------------------------------
+  // Geocoding (Nominatim) — called directly from the browser.
+  // Replaces the old /api/geocode endpoint in app.py, including its
+  // in-memory cache and its 1-request-per-second self rate limit.
+  // ---------------------------------------------------------------
+  var geocodeCache = {};
+  var nominatimQueue = Promise.resolve();
+  var lastNominatimCall = 0;
+
+  function geocode(query){
+    if (geocodeCache[query]) return Promise.resolve(geocodeCache[query]);
+
+    // Chain every lookup onto a queue so calls are spaced >= 1s apart.
+    var job = nominatimQueue.then(function(){
+      var wait = 1000 - (Date.now() - lastNominatimCall);
+      return new Promise(function(resolve){ setTimeout(resolve, Math.max(0, wait)); });
+    }).then(function(){
+      lastNominatimCall = Date.now();
+      var url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1' +
+                '&email=' + encodeURIComponent(CONTACT_EMAIL) +
+                '&q=' + encodeURIComponent(query);
+      return fetch(url);
+    }).then(function(r){
+      if (!r.ok) throw new Error('geocoder unavailable');
+      return r.json();
+    }).then(function(results){
+      if (!results.length) throw new Error('not found: ' + query);
+      var data = {
+        lat: parseFloat(results[0].lat),
+        lon: parseFloat(results[0].lon),
+        name: results[0].display_name
+      };
+      geocodeCache[query] = data;
+      return data;
+    });
+
+    // Keep the queue alive even if this job fails.
+    nominatimQueue = job.catch(function(){});
+    return job;
+  }
+
+  // ---------------------------------------------------------------
+  // Routing (OSRM public demo server) — called directly from the browser.
+  // Replaces the old /api/route endpoint, including its 2-minute cache.
+  // ---------------------------------------------------------------
+  var routeCache = {};
+
+  function fetchRoute(a, b){
+    var key = a.lat + ',' + a.lon + '-' + b.lat + ',' + b.lon;
+    var cached = routeCache[key];
+    if (cached && Date.now() - cached.t < ROUTE_CACHE_TTL_MS) {
+      return Promise.resolve(cached.data);
+    }
+
+    var url = 'https://router.project-osrm.org/route/v1/driving/' +
+              a.lon + ',' + a.lat + ';' + b.lon + ',' + b.lat +
+              '?overview=full&geometries=geojson';
+
+    return fetch(url).then(function(r){
+      if (!r.ok) throw new Error('router unavailable (' + r.status + ')');
+      return r.json();
+    }).then(function(body){
+      if (!body.routes || !body.routes.length) throw new Error('no route found');
+      var r = body.routes[0];
+      var data = {
+        // GeoJSON is [lon, lat]; Leaflet wants [lat, lon]
+        coords: r.geometry.coordinates.map(function(c){ return [c[1], c[0]]; }),
+        durationSec: r.duration,
+        distanceM: r.distance
+      };
+      routeCache[key] = { t: Date.now(), data: data };
+      return data;
+    });
+  }
+  // To add real-time traffic later (e.g. TomTom), swap out fetchRoute().
+  // Note: an API key placed here is visible to anyone who opens the file.
+
+  // --- Live ETA ticking + auto-refresh state ---
+  var liveCard = document.getElementById('liveCard');
+  var liveEta = document.getElementById('liveEta');
+  var liveSub = document.getElementById('liveSub');
+  var liveSynced = document.getElementById('liveSynced');
+  var arrivalTimestamp = null;
+  var lastSyncedAt = null;
+  var currentDistanceM = null;
+  var tickInterval = null;
+  var refreshInterval = null;
+  var currentPair = null; // {a, b} for auto-refresh
+
+  function fmtClock(d){
+    return d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+  }
+  function fmtDuration(sec){
+    var m = Math.round(sec/60);
+    if (m < 1) return '<1 min';
+    if (m < 60) return m + ' min';
+    return Math.floor(m/60) + 'h ' + (m%60) + 'm';
+  }
+
+  function tickLive(){
+    if (!arrivalTimestamp) return;
+    var now = Date.now();
+    var remainingSec = Math.max(0, Math.round((arrivalTimestamp - now)/1000));
+    liveEta.textContent = remainingSec <= 0 ? 'Arriving now' : fmtDuration(remainingSec) + ' away';
+    var distKm = currentDistanceM ? (currentDistanceM/1000).toFixed(1) + ' km · ' : '';
+    liveSub.textContent = distKm + 'ETA ' + fmtClock(new Date(arrivalTimestamp));
+    var agoSec = Math.round((now - lastSyncedAt)/1000);
+    liveSynced.textContent = 'synced ' + (agoSec < 5 ? 'just now' : agoSec + 's ago');
+  }
+
+  function startLiveTracking(durationSec, distanceM){
+    arrivalTimestamp = Date.now() + durationSec*1000;
+    currentDistanceM = distanceM;
+    lastSyncedAt = Date.now();
+    liveCard.classList.remove('hidden');
+    tickLive();
+    if (tickInterval) clearInterval(tickInterval);
+    tickInterval = setInterval(tickLive, 1000);
+  }
+
+  function stopLiveTracking(){
+    liveCard.classList.add('hidden');
+    arrivalTimestamp = null;
+    if (tickInterval) clearInterval(tickInterval);
+    if (refreshInterval) clearInterval(refreshInterval);
+  }
+
+  function clearRoute(){
+    if (startMarker) map.removeLayer(startMarker);
+    if (endMarker) map.removeLayer(endMarker);
+    if (routeLine) map.removeLayer(routeLine);
+    riderMarkers.forEach(function(m){ map.removeLayer(m); });
+    riderMarkers = [];
+    stopLiveTracking();
+  }
+
+  function pointAt(coords, fraction){
+    var i = Math.min(coords.length - 1, Math.floor(coords.length * fraction));
+    return coords[i];
+  }
+
+  function plotRiders(coords, names){
+    names.forEach(function(item, i){
+      var frac = 0.25 + i * 0.25;
+      var pt = pointAt(coords, frac);
+      var icon = L.divIcon({className:'', html:'<div class="rider-marker">'+item.name.charAt(0)+'</div>', iconSize:[26,26]});
+      var m = L.marker(pt, {icon: icon}).addTo(map).bindPopup('<b>'+item.name+'</b><br>'+(item.meta||item.car));
+      riderMarkers.push(m);
+      item._marker = m;
+      item._pt = pt;
+    });
+  }
+  var isPilot = false;
+  try { isPilot = localStorage.getItem('commute_pilot') === '1'; } catch(e){}
+
+  var toggle = document.getElementById('pilotToggle');
+  var modeLabel = document.getElementById('modeLabel');
+  var actionBtn = document.getElementById('actionBtn');
+  var passengerPanel = document.getElementById('passengerPanel');
+  var pilotPanel = document.getElementById('pilotPanel');
+  var acceptedPanel = document.getElementById('acceptedPanel');
+  var startInput = document.getElementById('startInput');
+  var endInput = document.getElementById('endInput');
+
+  var mockPilots = [
+    {name:'Vikram S.', car:'Silver Swift Dzire', meta:'4 min away · 2 seats free'},
+    {name:'Ananya R.', car:'White Nexon', meta:'9 min away · 1 seat free'},
+    {name:'Farhan K.', car:'Grey Baleno', meta:'12 min away · 3 seats free'}
+  ];
+  var mockRequests = [
+    {name:'Priya M.', meta:'0.3 km off your route · wants Indiranagar → Whitefield', x:120, y:120},
+    {name:'Devansh T.', meta:'0.6 km off your route · wants HAL → Whitefield', x:250, y:70},
+    {name:'Meera J.', meta:'On your route · wants ITPL → Whitefield', x:300, y:50}
+  ];
+
+  function renderList(ul, items, opts){
+    ul.innerHTML = '';
+    items.forEach(function(item, i){
+      var li = document.createElement('li');
+      li.className = 'row';
+      var left = document.createElement('div');
+      left.innerHTML = '<div class="who">'+item.name+'</div><div class="meta">'+(item.car||item.meta)+'</div>';
+      li.appendChild(left);
+      if (opts && opts.accept) {
+        var btn = document.createElement('button');
+        btn.className = 'accept-btn';
+        btn.textContent = 'Accept';
+        btn.onclick = function(){ acceptRider(item, i); };
+        li.appendChild(btn);
+      } else if (opts && opts.request) {
+        var btn2 = document.createElement('button');
+        btn2.className = 'accept-btn';
+        btn2.textContent = 'Request';
+        li.appendChild(btn2);
+      }
+      ul.appendChild(li);
+    });
+  }
+
+  function acceptRider(item, i){
+    mockRequests.splice(i,1);
+    renderList(document.getElementById('requestList'), mockRequests, {accept:true});
+    if (item._marker) {
+      item._marker.setIcon(L.divIcon({className:'', html:'<div class="rider-marker accepted">'+item.name.charAt(0)+'</div>', iconSize:[26,26]}));
+    }
+    var list = document.getElementById('acceptedList');
+    if (list.querySelector('.empty')) list.innerHTML = '';
+    var li = document.createElement('li');
+    li.className = 'row';
+    li.innerHTML = '<div class="who">'+item.name+'</div><div class="meta">'+item.meta+'</div>';
+    list.appendChild(li);
+  }
+
+  function applyMode(){
+    toggle.classList.toggle('on', isPilot);
+    toggle.setAttribute('aria-checked', isPilot ? 'true' : 'false');
+    modeLabel.textContent = isPilot ? 'Pilot' : 'Passenger';
+    actionBtn.textContent = isPilot ? 'Publish route' : 'Find a ride';
+    actionBtn.classList.toggle('pilot', isPilot);
+    passengerPanel.classList.toggle('hidden', isPilot);
+    pilotPanel.classList.toggle('hidden', !isPilot);
+    acceptedPanel.classList.toggle('hidden', !isPilot);
+  }
+
+  toggle.addEventListener('click', function(){
+    isPilot = !isPilot;
+    try { localStorage.setItem('commute_pilot', isPilot ? '1':'0'); } catch(e){}
+    applyMode();
+  });
+
+  actionBtn.addEventListener('click', function(){
+    var startQ = startInput.value.trim();
+    var endQ = endInput.value.trim();
+    if (!startQ || !endQ) { setStatus('Enter both a start point and a destination.'); return; }
+
+    clearRoute();
+    actionBtn.disabled = true;
+    setStatus('Locating addresses…');
+
+    Promise.all([geocode(startQ), geocode(endQ)]).then(function(pts){
+      var a = pts[0], b = pts[1];
+      currentPair = {a:a, b:b};
+      startMarker = L.marker([a.lat, a.lon], {icon: startIcon}).addTo(map).bindPopup('Start: ' + startQ);
+      endMarker = L.marker([b.lat, b.lon], {icon: endIcon}).addTo(map).bindPopup('Destination: ' + endQ);
+      setStatus('Drawing route…');
+      return fetchRoute(a, b).then(function(route){
+        routeLine = L.polyline(route.coords, {color:'#F2A93B', weight:4, dashArray:'1 8', lineCap:'round'}).addTo(map);
+        map.fitBounds(routeLine.getBounds(), {padding:[24,24]});
+        if (isPilot) {
+          plotRiders(route.coords, mockRequests);
+          setStatus('Route published. Riders near this route are shown on the map.');
+        } else {
+          plotRiders(route.coords, mockPilots);
+          setStatus('Pilots on this route are shown on the map.');
+        }
+        startLiveTracking(route.durationSec, route.distanceM);
+        // Re-sync with the live road network every 60s — recomputes if
+        // the chosen route/duration has shifted since the last query.
+        refreshInterval = setInterval(function(){
+          if (!currentPair) return;
+          fetchRoute(currentPair.a, currentPair.b).then(function(r){
+            startLiveTracking(r.durationSec, r.distanceM);
+          }).catch(function(e){ console.warn('Refresh failed:', e); });
+        }, 60000);
+      });
+    }).catch(function(err){
+      console.error('Route lookup failed:', err);
+      setStatus('Could not draw a route: ' + err.message);
+    }).finally(function(){
+      actionBtn.disabled = false;
+    });
+  });
+
+  renderList(document.getElementById('pilotList'), mockPilots, {request:true});
+  renderList(document.getElementById('requestList'), mockRequests, {accept:true});
+  applyMode();
+})();
+</script>
+</body>
+</html>
